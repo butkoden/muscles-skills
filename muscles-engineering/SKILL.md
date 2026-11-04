@@ -385,7 +385,16 @@ AI-функциональность должна быть отделена от 
 - Регистрируй фабрики внешних адаптеров один раз в каталоге composition root. Не повторяй `database` URL, capabilities и настройки соединения в конфигурации каждого пакета.
 - Считай ресурсы ленивыми: настройка и разрешение порта сами по себе не должны открывать соединение, если это не требуется контрактом операции. Не подключайся к БД при импорте модулей.
 - Для SQL используй требуемый порт, например `SqlTransactionPort`, чтобы границы транзакций были явными. Учитывай жизненный цикл `DataRuntime` и закрывай его при остановке приложения.
-- Реестр миграций относится к тому же runtime: регистрируй источники при инициализации приложения и используй `DataRuntime.migrations`; не создавай отдельный runtime или registry в командах CLI.
+- Реестр миграций относится к тому же runtime и доступен как `DataRuntime.migrations`. Не создавай отдельный runtime или registry в командах CLI.
+
+### Миграции Muscles Data
+
+- Разделяй ответственность библиотек: `muscles-data` владеет общим `MigrationRegistry` и discovery-контрактом; `muscles-data-sql` — нативными SQL-миграциями, SQL-backend и сборщиком реестра; `muscles-migrations` оставлен для совместимых старых импортов. Новый код не размещай в `muscles-migrations`.
+- В SQL-приложении один раз в composition root вызывай `build_native_sql_migration_registry(package_classes, database_url)` из `muscles.data.sql` и присваивай результат `app.resource.migrations`. Сборщик сам создаёт registry и execution lock, находит каталоги `migrate` у установленных пакетов, загружает модули и создаёт SQL-источники по `namespace`.
+- Имена миграций проекта: `migrate/000[0-9]_*.py`. Порядок источников выводится из `Package.dependencies` и ограничивается пакетами, у которых обнаружены миграции.
+- Не добавляй в классы пакетов `migration_sources()`, ручные списки ревизий, импорты `NativeSqlMigration` или собственные backend-ы. Не создавай в `App` отдельный `MigrationRegistry`, `SqlMigrationExecutionLock` или карту зависимостей миграций.
+- Модуль миграции объявляет уникальный упорядоченный `revision`, поддерживаемые `dialects`, `upgrade(transaction)` и, когда возможен безопасный откат, `downgrade(transaction)`. Обнаружение связывает исходный файл с контрольной суммой; уже применённый файл не редактируй — добавляй следующую ревизию.
+- Не запускай миграции при старте HTTP-приложения. CLI должен использовать `app.resource.migrations` того же экземпляра приложения; `plan` и `status` не должны менять схему.
 
 Проверенный шаблон composition root для текущего API `muscles-data` и
 `muscles-data-sql`:
@@ -395,11 +404,11 @@ AI-функциональность должна быть отделена от 
 from typing import Protocol
 
 from muscles import Configurator
-from muscles_data.catalog import DataAdapterCatalog
-from muscles_data.config import DataConfig
-from muscles_data.runtime import DataRuntime
-from muscles_data.ports import SqlTransactionPort
-from muscles_data_sql.data_adapter import NativeSqlFactory
+from muscles.data.catalog import DataAdapterCatalog
+from muscles.data.config import DataConfig
+from muscles.data.runtime import DataRuntime
+from muscles.data.ports import SqlTransactionPort
+from muscles.data.sql.data_adapter import NativeSqlFactory
 
 
 class ResourceApplication(Protocol):
